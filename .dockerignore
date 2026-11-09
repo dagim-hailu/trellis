@@ -1,0 +1,29 @@
+# Keep host build artifacts and installed dependencies out of the build context.
+# node_modules in particular must not cross the boundary: it is a Windows tree
+# with platform-specific binaries that would break a Linux container.
+
+node_modules
+**/node_modules
+
+# Build output is produced inside the image.
+**/dist
+**/.next
+**/tsconfig.tsbuildinfo
+
+# Local state and secrets.
+.env
+.env.local
+**/.env.local
+.storage
+**/.storage
+
+# Version control and editor noise.
+.git
+.gitignore
+.vscode
+.idea
+
+# Logs and OS files.
+*.log
+.DS_Store
+Thumbs.db

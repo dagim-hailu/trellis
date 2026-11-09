@@ -1,0 +1,27 @@
+{
+  "name": "trellis",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Real-time collaborative canvas with Yjs, PostgreSQL, Redis and Next.js",
+  "packageManager": "pnpm@11.28.5",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "pnpm run packages:build && turbo run build",
+    "packages:build": "pnpm --filter \"./packages/*\" run build",
+    "dev": "pnpm run packages:build && turbo run dev",
+    "dev:infra": "docker compose up -d postgres redis",
+    "dev:infra:down": "docker compose down",
+    "db:migrate": "pnpm --filter @trellis/db run migrate",
+    "db:seed": "pnpm run packages:build && pnpm --filter @trellis/api run seed",
+    "test": "pnpm run packages:build && turbo run test",
+    "typecheck": "pnpm run packages:build && turbo run typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "turbo": "2.11.10",
+    "typescript": "5.9.3",
+    "vitest": "4.1.12"
+  }
+}

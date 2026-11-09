@@ -1,0 +1,155 @@
+# Full Trellis stack: Postgres, Redis, migrations, API, realtime, web.
+#
+#   docker compose -f docker-compose.full.yml up --build
+#
+# Then open http://localhost:3100
+#
+# The base docker-compose.yml still exists for infra-only local development
+# (pnpm dev:infra), which maps Postgres and Redis to non-default host ports so
+# they do not collide with anything else. This file uses the default ports
+# internally and publishes only what the browser needs.
+
+name: trellis-full
+
+services:
+  postgres:
+    image: postgres:17.5-alpine
+    environment:
+      POSTGRES_DB: trellis
+      POSTGRES_USER: trellis
+      POSTGRES_PASSWORD: trellis_dev_password
+    volumes:
+      - trellis-full-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trellis -d trellis"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4.2-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # Applies migrations 001 and 002, then exits. Every other service waits for
+  # this to complete successfully, so no service ever runs against a schema
+  # that is missing the assets or comments tables.
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: trellis-api:local
+    command: ["node", "/app/packages/db/dist/migrate.js"]
+    working_dir: /app/packages/db
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://trellis:trellis_dev_password@postgres:5432/trellis
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: trellis-api:local
+    environment:
+      NODE_ENV: production
+      API_HOST: 0.0.0.0
+      API_PORT: 4400
+      DATABASE_URL: postgresql://trellis:trellis_dev_password@postgres:5432/trellis
+      JWT_SECRET: izluCIdk5tKJqMjMHT55hTeOYfkRBdnvi5S2b5nlEo4
+      JWT_ISSUER: trellis-api
+      JWT_AUDIENCE: trellis-clients
+      ACCESS_TOKEN_TTL_SECONDS: 3600
+      # The browser loads the web app from localhost:3100, so that is the
+      # origin the API must allow.
+      WEB_ORIGIN: http://localhost:3100
+      LOG_LEVEL: info
+      # Assets are written to a named volume so uploads survive a restart.
+      ASSET_STORAGE_DIR: /app/.storage
+      PUBLIC_BASE_URL: http://localhost:4400
+    volumes:
+      - trellis-full-assets:/app/.storage
+    ports:
+      - "4400:4400"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        ["CMD", "node", "-e", "fetch('http://127.0.0.1:4400/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  realtime:
+    build:
+      context: .
+      dockerfile: apps/realtime/Dockerfile
+    image: trellis-realtime:local
+    environment:
+      NODE_ENV: production
+      REALTIME_HOST: 0.0.0.0
+      REALTIME_PORT: 4401
+      DATABASE_URL: postgresql://trellis:trellis_dev_password@postgres:5432/trellis
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: izluCIdk5tKJqMjMHT55hTeOYfkRBdnvi5S2b5nlEo4
+      JWT_ISSUER: trellis-api
+      JWT_AUDIENCE: trellis-clients
+      WEB_ORIGIN: http://localhost:3100
+      REDIS_CHANNEL_PREFIX: trellis
+      LOG_LEVEL: info
+    ports:
+      - "4401:4401"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        ["CMD", "node", "-e", "fetch('http://127.0.0.1:4401/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Browser-reachable URLs, not compose service names.
+        NEXT_PUBLIC_API_URL: http://localhost:4400
+        NEXT_PUBLIC_REALTIME_URL: ws://localhost:4401
+    image: trellis-web:local
+    environment:
+      NODE_ENV: production
+      PORT: 3100
+    ports:
+      - "3100:3100"
+    depends_on:
+      api:
+        condition: service_healthy
+      realtime:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  trellis-full-postgres:
+  trellis-full-assets:
